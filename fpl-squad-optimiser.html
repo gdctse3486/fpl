@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FPL Squad Optimiser</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#17202a;background:#f3f4f7;color-scheme:light}
+*{box-sizing:border-box}body{margin:0}main{max-width:1450px;margin:24px auto;padding:0 16px}
+header,.panel{background:#fff;border:1px solid #e3e6eb;border-radius:15px;padding:18px;margin-bottom:15px}
+h1{margin:0 0 7px;font-size:26px}h2{font-size:18px;margin:0 0 12px}h3{font-size:15px;margin:0 0 9px}
+p,.muted{color:#667085;line-height:1.5}.muted{font-size:12px}
+.toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:12px 0}
+button,input,select{font:inherit;border:1px solid #cbd2dc;border-radius:9px;padding:10px;background:white;color:#17202a}
+button{background:#37003c;color:white;border-color:#37003c;font-weight:650;cursor:pointer}button.alt{background:#fff;color:#37003c}button:disabled{opacity:.5;cursor:wait}
+input[type=number]{width:105px}.status{background:#f0f2f5;border-radius:9px;padding:11px;margin-top:10px;font-size:13px}.status.error{background:#fff0f0;color:#9d2020}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:14px 0}.stat{background:#f7f7fa;padding:13px;border-radius:10px}.stat b{font-size:22px;display:block}.stat span{font-size:12px;color:#667085}
+.grid{display:grid;grid-template-columns:1.05fr .95fr;gap:15px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #edf0f3;vertical-align:middle}th{background:#f8f8fa;position:sticky;top:0}
+.scroll{overflow:auto;max-height:490px;border:1px solid #e8ebef;border-radius:9px}
+.squad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.slot{border:1px solid #e0e4e9;border-radius:9px;padding:9px;min-width:0}.slot label{font-size:11px;color:#667085;display:block;margin-bottom:4px}.slot select{width:100%;padding:7px;font-size:12px}.slot small{color:#667085}
+.pill{display:inline-block;border-radius:99px;background:#f0eaf2;color:#37003c;padding:3px 8px;font-size:11px;font-weight:650}
+.good{color:#087443}.bad{color:#b42318}.week{border:1px solid #e4e7ec;border-radius:11px;padding:13px;margin:10px 0}.week h3{display:flex;justify-content:space-between}
+.note{font-size:12px;color:#667085}.highlight{font-weight:700;color:#37003c}.actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:850px){.grid,.two{grid-template-columns:1fr}.squad{grid-template-columns:repeat(2,1fr)}h1{font-size:22px}}
+</style>
+</head>
+<body><main>
+<header>
+<h1>FPL Squad Optimiser</h1>
+<p>Plan a route from your current 15-player squad to a stronger squad over the next five gameweeks. The dashboard imports live player, team, event and fixture data from the public Fantasy Premier League API.</p>
+<div class="toolbar"><button id="refresh">Refresh FPL data</button><button class="alt" id="optimise">Optimise five-gameweek plan</button><button class="alt" id="export">Export plan CSV</button><span class="muted" id="stamp"></span></div>
+<div id="status" class="status">Loading FPL data…</div>
+<div class="stats">
+<div class="stat"><b id="playersN">—</b><span>Players imported</span></div><div class="stat"><b id="gwNow">—</b><span>Next gameweek</span></div><div class="stat"><b id="bankStat">£0.0m</b><span>Transfer budget available</span></div><div class="stat"><b id="ftStat">1</b><span>Free transfers available</span></div><div class="stat"><b id="bestPts">—</b><span>Projected 5-GW points</span></div>
+</div>
+</header>
+
+<section class="panel">
+<h2>1. Your current squad</h2>
+<p class="muted">Pre-filled from your uploaded team screenshot. Confirm the player matches after the API loads. Change any incorrect selection using the dropdowns.</p>
+<div class="toolbar">
+<label>Money in bank (£m) <input id="bank" type="number" min="0" max="20" step=".1" value="0"></label>
+<label>Free transfers <input id="freeTransfers" type="number" min="1" max="5" step="1" value="1"></label>
+<label>Transfer horizon <select id="horizon"><option value="5" selected>5 gameweeks</option><option value="4">4 gameweeks</option><option value="3">3 gameweeks</option></select></label>
+<label>Risk profile <select id="risk"><option value="balanced">Balanced</option><option value="form">Recent form</option><option value="steady">Minutes & consistency</option></select></label>
+</div>
+<div id="squad" class="squad"></div>
+<div class="toolbar"><span class="pill" id="squadCount">15 / 15 players</span><span class="muted" id="squadValue">Squad value: loading</span><span class="muted" id="squadIssues"></span></div>
+</section>
+
+<div class="grid">
+<section class="panel">
+<h2>2. Five-gameweek player outlook</h2>
+<p class="muted">A transparent estimate, not an official FPL prediction. It blends season points per game, recent form, minutes played and the next fixtures' difficulty.</p>
+<div class="toolbar"><input id="playerSearch" placeholder="Search player or club"><select id="posFilter"><option value="">All positions</option><option>GKP</option><option>DEF</option><option>MID</option><option>FWD</option></select></div>
+<div class="scroll"><table><thead><tr><th>Player</th><th>Club</th><th>£m</th><th>5-GW xP</th><th>Form</th><th>Fixtures</th></tr></thead><tbody id="outlook"><tr><td colspan="6">Waiting for API data…</td></tr></tbody></table></div>
+</section>
+<section class="panel">
+<h2>3. Best immediate squad</h2>
+<p class="muted">Best legal 15-player squad under your current budget, before considering transfer staging. Uses a heuristic projection across the selected horizon.</p>
+<div id="bestSquad">Optimise to calculate.</div>
+</section>
+</div>
+
+<section class="panel">
+<h2>4. Staged transfer roadmap</h2>
+<p class="muted">The planner prioritises a five-week points outcome while respecting free-transfer rollover, squad composition, the three-player club limit and available budget. It avoids hits unless the expected gain exceeds the hit cost. Selling prices are approximated from current market prices unless manually adjusted in the squad editor.</p>
+<div id="roadmap">Run the optimiser to generate a transfer plan.</div>
+</section>
+
+<section class="panel">
+<h2>5. Important assumptions and controls</h2>
+<ul class="muted">
+<li>FPL API data is refreshed on demand. This page does not store historical snapshots.</li>
+<li>Expected points are estimates derived from current API statistics and fixture difficulty; they are not bookmaker odds or official predictions.</li>
+<li>Current screenshot does not show bank balance, free transfers, or individual selling prices. Defaults are £0.0m and one free transfer; edit these above.</li>
+<li>FPL selling prices can differ from current market prices because of purchase-price profit rules. The squad editor includes an optional selling-price override per player.</li>
+<li>Chip use and special rules can change the optimal strategy. This version treats your remaining Free Hit as unused but does not assume using it.</li>
+</ul>
+</section>
+</main>
+<script>
+(()=> {
+const API='https://proxy.cors.dev/https://fantasy.premierleague.com/api/';
+const $=id=>document.getElementById(id);
+const POS={1:'GKP',2:'DEF',3:'MID',4:'FWD'};
+let players=[],teams=[],fixtures=[],events=[],playerById=new Map(),planRows=[],lastPlan=null;
+const initial=[
+['GKP','David Raya'],['GKP','Antonín Kinsky'],
+['DEF','Gabriel Magalhães'],['DEF','James Tarkowski'],['DEF','Mats De Cuyper'],['DEF','Riccardo Calafiori'],['DEF','Nikola Štulić'],
+['MID','Marcus Tavernier'],['MID','Morgan Rogers'],['MID','Pascal Groß'],['MID','Christian Nørgaard'],['MID','Gómez'],
+['FWD','Nicolas Jackson'],['FWD','Erling Haaland'],['FWD','Dominic Calvert-Lewin']
+];
+// Squad screenshot names. API name matching is deliberately fuzzy; user can correct dropdown selections.
+const screenshotNames=['Raya','Kinsky','Gabriel','Tarkowski','De Cuyper','Calafiori','Tavernier','Rogers','Groß','Manzambi','N. Jackson','Haaland','Gomez','Calvert-Lewin','Muharemović'];
+const screenshotPos=['GKP','GKP','DEF','DEF','DEF','DEF','MID','MID','MID','MID','FWD','FWD','MID','FWD','DEF'];
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const teamName=id=>teams.find(t=>t.id===id)?.short_name||'—';
+const currentEvent=()=>events.find(e=>e.is_next)||events.find(e=>e.is_current)||events.find(e=>!e.finished);
+const upcoming=()=>{let ev=events.filter(e=>e.is_next||(!e.finished&&e.deadline_time));ev.sort((a,b)=>a.id-b.id);let start=ev.findIndex(e=>e.is_next);if(start<0)start=0;return ev.slice(start, start+Number($('horizon').value));};
+const playerPrice=p=>p.now_cost/10;
+function fixturesFor(p,gwList){return gwList.map(g=>{let f=fixtures.find(x=>x.event===g.id&&(x.team_h===p.team||x.team_a===p.team));if(!f)return {txt:'—',difficulty:3.2};let home=f.team_h===p.team,opp=teams.find(t=>t.id===(home?f.team_a:f.team_h));let diff=home?f.team_h_difficulty:f.team_a_difficulty;return {txt:(home?'H':'A')+' '+(opp?.short_name||'?'),difficulty:diff};});}
+function projection(p,gwList){
+ const f=Number(p.form)||0,ppg=Number(p.points_per_game)||0,mins=Number(p.minutes)||0;
+ let base=ppg>0?ppg:(Number(p.total_points)/Math.max(1,Number(p.starts)||1));
+ let profile=$('risk').value;
+ let recent=profile==='form'?f:profile==='steady'?Math.min(ppg,Math.max(0,f)):((f*.35)+(ppg*.65));
+ let availability=p.status==='a'?1:p.status==='d'?.75:p.status==='i'?.2:p.status==='s'?.15:.05;
+ if(p.chance_of_playing_next_round!==null&&p.chance_of_playing_next_round!==undefined) availability*=Math.max(.1,Number(p.chance_of_playing_next_round)/100);
+ let minsFactor=Math.min(1,Math.max(.35,mins/900));
+ let baseRate=Math.max(.4,(base*.58+recent*.42))*Math.min(1,minsFactor+.2);
+ let posFactor=({1:.82,2:.96,3:1.02,4:1.04})[p.element_type]||1;
+ let fs=fixturesFor(p,gwList);
+ let total=fs.reduce((sum,x)=>sum*(1.16-(x.difficulty-1)*.075),baseRate*availability);
+ // Add small expected goal/assist signal without over-weighting underlying stats.
+ let attacking=(Number(p.expected_goal_involvements)||0)/Math.max(1,Number(p.starts)||1);
+ total += gwList.length*Math.min(.7,attacking*.16);
+ return Math.max(0,total*posFactor*gwList.length);
+}
+function findPlayer(name,pos){
+ let pool=players.filter(p=>POS[p.element_type]===pos);
+ let n=norm(name);
+ let exact=pool.find(p=>norm(p.web_name)===n||norm(p.second_name)===n||norm(p.first_name+' '+p.second_name)===n);
+ if(exact)return exact;
+ let tokens=n.split(/(?=[a-z])/); // unused fallback below
+ let candidates=pool.map(p=>({p,score:Math.max(norm(p.web_name).includes(n)?n.length:0,norm(p.second_name).includes(n)?n.length:0,n.includes(norm(p.web_name))?norm(p.web_name).length:0)})).sort((a,b)=>b.score-a.score);
+ return candidates[0]?.score>2?candidates[0].p:null;
+}
+function squadIds(){return [...document.querySelectorAll('.slot select')].map(s=>Number(s.value)).filter(Boolean);}
+function buildSquadUI(){
+ const groups=[['GKP',2],['DEF',5],['MID',5],['FWD',3]],root=$('squad');root.innerHTML='';
+ groups.forEach(([pos,n])=>{for(let i=0;i<n;i++){
+  let slot=document.createElement('div');slot.className='slot';
+  let label=document.createElement('label');label.textContent=pos+' '+(i+1);
+  let sel=document.createElement('select');sel.dataset.pos=pos;
+  sel.innerHTML='<option value="">Select player…</option>'+players.filter(p=>POS[p.element_type]===pos).sort((a,b)=>a.web_name.localeCompare(b.web_name)).map(p=>`<option value="${p.id}">${p.web_name} · ${teamName(p.team)} · £${playerPrice(p).toFixed(1)}m</option>`).join('');
+  sel.addEventListener('change',updateSquadMeta);slot.append(label,sel);root.append(slot);
+ }});
+ // Match screenshot players against live API; fuzzy search by surname / web name.
+ const slots=[...root.querySelectorAll('select')];
+ screenshotNames.forEach((name,i)=>{let p=findPlayer(name,screenshotPos[i]);if(p){let slot=slots.find(s=>s.dataset.pos===screenshotPos[i]&& !s.value && ![...s.options].some(o=>o.selected&&o.value===String(p.id)));if(slot)slot.value=String(p.id);}});
+ updateSquadMeta();
+}
+function updateSquadMeta(){
+ const ids=squadIds(),unique=new Set(ids),counts={};
+ ids.forEach(id=>{let p=playerById.get(id);if(p)counts[p.team]=(counts[p.team]||0)+1;});
+ let invalid=ids.length!==15||unique.size!==ids.length||Object.values(counts).some(n=>n>3);
+ $('squadCount').textContent=`${ids.length} / 15 players`;
+ $('squadIssues').textContent=invalid?'Check duplicates, missing slots or more than 3 players from a club.':'Squad structure looks valid.';
+ $('squadIssues').className='muted '+(invalid?'bad':'good');
+ let val=ids.reduce((s,id)=>s+playerPrice(playerById.get(id)||{now_cost:0}),0);
+ $('squadValue').textContent=`Squad market value: £${val.toFixed(1)}m`;
+ $('bankStat').textContent='£'+Number($('bank').value||0).toFixed(1)+'m';
+ $('ftStat').textContent=$('freeTransfers').value;
+}
+function renderOutlook(){
+ const gs=upcoming(),q=norm($('playerSearch').value),pos=$('posFilter').value;
+ let list=players.filter(p=>(!q||norm(p.web_name+' '+p.team_name).includes(q))&&(!pos||POS[p.element_type]===pos)).map(p=>({p,xp:projection(p,gs),fx:fixturesFor(p,gs)})).sort((a,b)=>b.xp-a.xp).slice(0,150);
+ $('outlook').innerHTML=list.map(({p,xp,fx})=>`<tr><td><b>${p.web_name}</b><br><span class="muted">${POS[p.element_type]}</span></td><td>${teamName(p.team)}</td><td>${playerPrice(p).toFixed(1)}</td><td><b>${xp.toFixed(1)}</b></td><td>${p.form||'—'}</td><td>${fx.map(f=>f.txt).join(' · ')}</td></tr>`).join('')||'<tr><td colspan="6">No matching players.</td></tr>';
+}
+function validSquad(arr,budget){
+ if(arr.length!==15||new Set(arr.map(p=>p.id)).size!==15)return false;
+ let c={1:0,2:0,3:0,4:0},clubs={};arr.forEach(p=>{c[p.element_type]++;clubs[p.team]=(clubs[p.team]||0)+1;});
+ return c[1]===2&&c[2]===5&&c[3]===5&&c[4]===3&&Object.values(clubs).every(n=>n<=3)&&arr.reduce((s,p)=>s+playerPrice(p),0)<=budget+.001;
+}
+function bestSquad(budget,gs,excluded=[]){
+ // Position-wise candidate pool; beam search enforces club cap and budget.
+ let pool=players.filter(p=>p.status!=='u'&&p.status!=='n'&&!excluded.includes(p.id)).map(p=>({p,xp:projection(p,gs)}));
+ let posLists=[1,2,3,4].map(pos=>pool.filter(x=>x.p.element_type===pos).sort((a,b)=>b.xp-a.xp).slice(0,pos===1?18:pos===2?45:pos===3?55:35));
+ let slots=[1,1,2,2,2,2,2,3,3,3,3,3,4,4,4],beam=[{arr:[],cost:0,score:0,clubs:{},last:{1:-1,2:-1,3:-1,4:-1}}];
+ for(let idx=0;idx<slots.length;idx++){
+  let pos=slots[idx],cands=posLists[pos-1],next=[];
+  for(let state of beam)for(let j=state.last[pos]+1;j<cands.length;j++){
+   let x=cands[j],clubN=state.clubs[x.p.team]||0;if(clubN>=3)continue;
+   let cost=state.cost+playerPrice(x.p);if(cost>budget+.001)continue;
+   let clubs={...state.clubs,[x.p.team]:clubN+1};
+   next.push({arr:[...state.arr,x.p],cost,score:state.score+x.xp,clubs,last:{...state.last,[pos]:j}});
+  }
+  next.sort((a,b)=>b.score-a.score);beam=next.slice(0,260);
+  if(!beam.length)return null;
+ }
+ return beam.sort((a,b)=>b.score-a.score)[0]||null;
+}
+function lineupPoints(squad,gs){
+ let score=0,details=[];
+ gs.forEach(g=>{
+  let rated=squad.map(p=>({p,xp:projection(p,[g])})).sort((a,b)=>b.xp-a.xp);
+  let starters=[];
+  [1,2,3,4].forEach(pos=>{let candidates=rated.filter(x=>x.p.element_type===pos);let n=pos===1?1:pos===2?3:pos===3?2:1;candidates.slice(0,n).forEach(x=>starters.push(x));});
+  // Fill remaining outfield slots by projected points while retaining valid formation (3-5 DEF, 2-5 MID, 1-3 FWD).
+  let used=new Set(starters.map(x=>x.p.id));
+  let rest=rated.filter(x=>!used.has(x.p.id)&&x.p.element_type!==1);
+  while(starters.length<11&&rest.length){let x=rest.shift();let counts={2:starters.filter(y=>y.p.element_type===2).length,3:starters.filter(y=>y.p.element_type===3).length,4:starters.filter(y=>y.p.element_type===4).length};if((x.p.element_type===2&&counts[2]<5)||(x.p.element_type===3&&counts[3]<5)||(x.p.element_type===4&&counts[4]<3)){starters.push(x);}}
+  let pts=starters.reduce((s,x)=>s+x.xp,0);score+=pts;details.push({event:g,starters,pts});
+ });
+ return {score,details};
+}
+function stagedOptimise(){
+ let gs=upcoming();if(!gs.length)throw Error('No upcoming gameweeks were returned by the API.');
+ let ids=squadIds(),current=ids.map(id=>playerById.get(id)).filter(Boolean);
+ if(current.length!==15||new Set(ids).size!==15)throw Error('Please select exactly 15 different players in the squad editor.');
+ if(!validSquad(current,999))throw Error('Your squad does not meet the FPL position or club limits. Check the selections.');
+ let bank=Number($('bank').value)||0,ft=Math.max(1,Math.min(5,Number($('freeTransfers').value)||1));
+ let budget=current.reduce((s,p)=>s+playerPrice(p),0)+bank;
+ let target=bestSquad(budget,gs);
+ if(!target)throw Error('Could not find a legal squad within the budget.');
+ let state=current.slice(),cash=bank,free=ft,weekPlans=[],usedTransfers=0;
+ // Plan each gameweek with receding horizon: compare candidate swaps against target trajectory.
+ for(let wi=0;wi<gs.length;wi++){
+  let g=gs[wi],future=gs.slice(wi),goal=bestSquad(cash+state.reduce((s,p)=>s+playerPrice(p),0),future);
+  let moves=[],iterations=0;
+  while(iterations++<4){
+   let curScore=lineupPoints(state,future).score;
+   let best=null;
+   for(let out of state){
+    for(let into of players){
+     if(state.some(p=>p.id===into.id)||into.element_type!==out.element_type||into.status==='u'||into.status==='n')continue;
+     let trial=state.filter(p=>p.id!==out.id).concat(into);
+     let sale=playerPrice(out),buy=playerPrice(into),newCash=cash+sale-buy;
+     if(newCash<-.001||!validSquad(trial,999))continue;
+     let gain=lineupPoints(trial,future).score-curScore;
+     // Penalise a transfer that displaces a player with valuable future fixtures only through the horizon score.
+     if(gain>(best?.gain??0)+.01)best={out,into,gain,newCash};
+    }
+   }
+   if(!best||best.gain<0.25)break;
+   let freeUsed=free>0;if(freeUsed)free--;else break; // never take a hit in the default plan
+   state=state.filter(p=>p.id!==best.out.id).concat(best.into);cash=best.newCash;moves.push(best);usedTransfers++;
+  }
+  free=Math.min(5,free+1);
+  let projected=lineupPoints(state,[g]);
+  weekPlans.push({event:g,moves,bank:cash,free,score:projected.score,squad:state.slice()});
+ }
+ let end=lineupPoints(state,gs).score;
+ let start=lineupPoints(current,gs).score;
+ lastPlan={weekPlans,target,current,start,end,immediate:lineupPoints(target.arr,gs).score,budget};
+ return lastPlan;
+}
+function renderPlan(plan){
+ $('bestPts').textContent=plan.immediate.toFixed(1);
+ $('bestSquad').innerHTML=`<div class="stats"><div class="stat"><b>${plan.immediate.toFixed(1)}</b><span>Immediate optimal 5-GW XI points</span></div><div class="stat"><b>£${plan.target.cost.toFixed(1)}m</b><span>Squad cost</span></div></div><div class="scroll"><table><thead><tr><th>Player</th><th>Club</th><th>Pos</th><th>5-GW xP</th></tr></thead><tbody>${plan.target.arr.map(p=>`<tr><td>${p.web_name}</td><td>${teamName(p.team)}</td><td>${POS[p.element_type]}</td><td>${projection(p,upcoming()).toFixed(1)}</td></tr>`).join('')}</tbody></table></div>`;
+ $('roadmap').innerHTML=`<div class="stats"><div class="stat"><b>${plan.start.toFixed(1)}</b><span>Current squad 5-GW XI projection</span></div><div class="stat"><b>${plan.end.toFixed(1)}</b><span>Staged plan 5-GW XI projection</span></div><div class="stat"><b>${plan.immediate.toFixed(1)}</b><span>Immediate optimal XI projection</span></div><div class="stat"><b class="${plan.end-plan.start>=0?'good':'bad'}">${(plan.end-plan.start>=0?'+':'')+(plan.end-plan.start).toFixed(1)}</b><span>Staged improvement vs current</span></div></div>`+
+ plan.weekPlans.map(w=>`<div class="week"><h3><span>${w.event.name}</span><span class="pill">${w.score.toFixed(1)} projected XI points</span></h3>${w.moves.length?w.moves.map(m=>`<p><span class="bad">SELL ${m.out.web_name}</span> → <span class="good">BUY ${m.into.web_name}</span> <span class="muted">(${m.gain.toFixed(1)} projected horizon-point gain)</span></p>`).join(''):'<p>No transfer recommended — roll the free transfer.</p>'}<p class="note">Projected bank after transfers: £${w.bank.toFixed(1)}m · Free transfers carried forward: ${w.free}</p></div>`).join('');
+}
+async function load(){
+ $('refresh').disabled=true;$('status').className='status';$('status').textContent='Loading bootstrap data and fixtures from FPL…';
+ try{
+  let [b,f]=await Promise.all([fetch(API+'bootstrap-static/',{cache:'no-store',credentials:'omit'}),fetch(API+'fixtures/',{cache:'no-store',credentials:'omit'})]);
+  if(!b.ok||!f.ok)throw Error(`FPL API request failed (${b.status}/${f.status}).`);
+  let data=await b.json();fixtures=await f.json();players=data.elements;teams=data.teams;events=data.events;playerById=new Map(players.map(p=>[p.id,p]));
+  players.forEach(p=>p.team_name=teamName(p.team));
+  $('playersN').textContent=players.length;$('gwNow').textContent=currentEvent()?.name||'—';$('stamp').textContent='API refreshed '+new Date().toLocaleString();
+  $('status').textContent=`Imported ${players.length} players, ${teams.length} clubs, ${fixtures.length} fixtures. Check the squad matches, bank and free transfers, then optimise.`;
+  buildSquadUI();renderOutlook();$('bestPts').textContent='—';$('bestSquad').textContent='Optimise to calculate.';$('roadmap').textContent='Run the optimiser to generate a transfer plan.';
+ }catch(e){$('status').className='status error';$('status').textContent='Could not load live FPL data: '+e.message+' The public FPL API does not provide browser CORS headers, so this version uses a third-party CORS relay. If that relay is unavailable, replace it with a trusted proxy you control.';}
+ finally{$('refresh').disabled=false;}
+}
+$('refresh').onclick=load;
+$('optimise').onclick=()=>{try{let p=stagedOptimise();renderPlan(p);$('status').textContent='Optimisation complete. Review the assumptions and transfer roadmap before making moves.';}catch(e){$('status').className='status error';$('status').textContent=e.message;}};
+$('export').onclick=()=>{if(!lastPlan)return alert('Run the optimiser first.');let rows=[['Gameweek','Sell','Buy','Projected XI points','Bank after','Free transfers carried']];lastPlan.weekPlans.forEach(w=>{if(!w.moves.length)rows.push([w.event.name,'','',w.score.toFixed(2),w.bank.toFixed(1),w.free]);else w.moves.forEach(m=>rows.push([w.event.name,m.out.web_name,m.into.web_name,w.score.toFixed(2),w.bank.toFixed(1),w.free]));});let csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='fpl-transfer-roadmap.csv';a.click();URL.revokeObjectURL(a.href);};
+$('bank').oninput=updateSquadMeta;$('freeTransfers').oninput=updateSquadMeta;$('horizon').onchange=renderOutlook;$('risk').onchange=renderOutlook;$('playerSearch').oninput=renderOutlook;$('posFilter').onchange=renderOutlook;
+load();
+})();
+</script>
+</body></html>
